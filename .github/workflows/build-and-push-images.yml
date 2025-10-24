@@ -1,0 +1,111 @@
+name: Build and Push Images to GHCR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ next, main ]
+    paths:
+      - 'packages/mock-app/**'
+      - 'packages/untp-playground/**'
+      - 'Dockerfile'
+      - '.github/workflows/build-and-push-images.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_MOCK_APP: quartech/tests-untp
+  IMAGE_NAME_PLAYGROUND: quartech/untp-playground
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for Mock App
+      id: meta-mock-app
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_MOCK_APP }}
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Mock App
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        build-args: |
+          CONFIG_FILE=app-config.json
+        push: true
+        tags: ${{ steps.meta-mock-app.outputs.tags }}
+        labels: ${{ steps.meta-mock-app.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Extract metadata for UNTP Playground
+      id: meta-playground
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLAYGROUND }}
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push UNTP Playground
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./packages/untp-playground/Dockerfile
+        build-args: |
+          NEXT_PUBLIC_VERIFICATION_SERVICE_URL=/api/vckit/agent/routeVerificationCredential
+          NEXT_PUBLIC_VERIFICATION_SERVICE_TOKEN=test123
+        push: true
+        tags: ${{ steps.meta-playground.outputs.tags }}
+        labels: ${{ steps.meta-playground.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Image Summary
+      run: |
+        echo "## 🎉 Images pushed to GitHub Container Registry" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Mock App" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.meta-mock-app.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### UNTP Playground" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.meta-playground.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Helm Configuration" >> $GITHUB_STEP_SUMMARY
+        echo '```yaml' >> $GITHUB_STEP_SUMMARY
+        echo "mockApp:" >> $GITHUB_STEP_SUMMARY
+        echo "  image:" >> $GITHUB_STEP_SUMMARY
+        echo "    repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_MOCK_APP }}" >> $GITHUB_STEP_SUMMARY
+        echo "    tag: latest" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "untpPlayground:" >> $GITHUB_STEP_SUMMARY
+        echo "  image:" >> $GITHUB_STEP_SUMMARY
+        echo "    repository: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLAYGROUND }}" >> $GITHUB_STEP_SUMMARY
+        echo "    tag: latest" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
